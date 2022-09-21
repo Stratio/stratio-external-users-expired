@@ -1,0 +1,9 @@
+__pycache__/
+ansible/roles/node-exporter/files/
+
+.idea
+venv/
+.cache
+.local
+
+my_config.ini
