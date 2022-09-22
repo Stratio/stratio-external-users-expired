@@ -396,7 +396,7 @@ def main():
     logging.basicConfig(encoding='utf-8', level=logging_level)
 
     if args.days is not None and args.days <= 0:
-        logging.error("Days must be a int > 0")
+        parser.error("Days must be a int > 0")
         exit(-1)
 
     config = load_config(args.config_file_path)
