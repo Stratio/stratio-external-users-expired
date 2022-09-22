@@ -5,7 +5,6 @@ import argparse
 import calendar
 import configparser
 from ldap3 import Server, Connection, ALL, SIMPLE, ALL_ATTRIBUTES, ALL_OPERATIONAL_ATTRIBUTES
-from ldap3.core.exceptions import LDAPCursorError
 import logging
 import time
 import smtplib
@@ -13,6 +12,7 @@ import smtplib
 # VARS
 CONFIG_FILE_PATH = "./config.ini"
 DEFAULT_LOGGING = "debug"
+ADMINISTRATORS = "sysinternal"
 
 
 def load_config(config_file_path):
@@ -53,47 +53,36 @@ def get_ldap_users(config, days_expire):
     users_delete = []
     managers_delete = []
     now = calendar.timegm(time.gmtime())
+    if days_expire is None:
+        days_expire = 0
     epoch_expire = days_expire * 24 * 60 * 60
     for user in conn.entries:
-        service = ""
-        try:
-            if int(str(user.shadowExpire)) < now:
-                for description in user.description:
+        if int(str(user.shadowExpire)) < now:
+            info = [s for s in user.description if s.__contains__("Responsable")]
+            manager = str(info).split(',')[0].split(': ')[1].strip()
+            if manager not in managers:
+                managers_delete.append(manager)
+            service = [s for s in user.description if not s.__contains__("Responsable")]
+            users_delete.append({"user": str(user.uid),
+                                 "mail": str(user.mail),
+                                 "expire": str(user.shadowExpire),
+                                 "manager": str(manager),
+                                 "service": str(service[0]),
+                                 "jira": str(info).split(',')[1].split(': ')[1].strip()})
 
-                    if "Responsable" not in description:
-                        service = str(description)
+        elif int(str(user.shadowExpire)) - now < epoch_expire:
+            info = [s for s in user.description if s.__contains__("Responsable")]
+            manager = str(info).split(',')[0].split(': ')[1].strip()
+            if manager not in managers:
+                managers_delete.append(manager)
+            service = [s for s in user.description if not s.__contains__("Responsable")]
+            users_delete.append({"user": str(user.uid),
+                                 "mail": str(user.mail),
+                                 "expire": str(user.shadowExpire),
+                                 "manager": str(manager),
+                                 "service": str(service[0]),
+                                 "jira": str(info).split(',')[1].split(': ')[1].strip()})
 
-                    if "Responsable" in description:
-                        manager = str(description).split(',')[0].split(': ')[1].strip()
-                        if manager not in managers:
-                            managers_delete.append(manager)
-                        users_delete.append({"user": str(user.uid),
-                                             "mail": str(user.mail),
-                                             "expire": str(user.shadowExpire),
-                                             "manager": str(manager),
-                                             "service": str(service),
-                                             "jira": str(description).split(',')[1].split(': ')[1].strip()})
-
-            elif int(str(user.shadowExpire)) - now < epoch_expire:
-                for description in user.description:
-
-                    if "Responsable" not in description:
-                        service = str(description)
-
-                    if "Responsable" in description:
-                        manager = str(description).split(',')[0].split(': ')[1].strip()
-                        if manager not in managers:
-                            managers.append(manager)
-                        users.append({"user": str(user.uid),
-                                      "mail": str(user.mail),
-                                      "expire": str(user.shadowExpire),
-                                      "manager": str(manager),
-                                      "service": str(service),
-                                      "jira": str(description).split(',')[1].split(': ')[1].strip()})
-
-        except LDAPCursorError:
-            logging.error("Cant get LDAP Users")
-            exit(-1)
     return managers, users, managers_delete, users_delete
 
 
@@ -128,7 +117,7 @@ def delete_ldap_users(config, users, dry_run):
 
 
 def send_mail_delete(config, managers, users, dry_run):
-    logging.info("Prepare to delete old users")
+    logging.info("Prepare to send emails to managers")
     for manager in managers:
         mail_headers = """From: <sistemas@stratio.com>
 To: To Person <{}@stratio.com>
@@ -174,8 +163,6 @@ Next access users were removed from their services associated:
 """.format(user["jira"])
 
         mail_tail = """</table>
-<br>
-You must notify the <b>team responsible</b> for the service so that the user does not lose access <b>before its expiration date</b>.
 <br><br>
 Thanks for your time
 """
@@ -202,6 +189,79 @@ Thanks for your time
 
             except smtplib.SMTPException as e:
                 logging.error("Unable to send email to {}: {}".format(manager, e))
+        else:
+            logging.info("Param --dry-run detected, mail didn't send")
+
+    logging.info("Prepare to send emails to administrators")
+    mail_headers = """From: <sistemas@stratio.com>
+To: To Person <{}@stratio.com>
+MIME-Version: 1.0
+Content-type: text/html
+Subject: Remove external user access
+""".format(ADMINISTRATORS)
+        
+    mail_body = """
+Hi: 
+<br><br>
+Next access users were removed from their services associated:
+<br>
+<table>
+  <tr>
+    <th>User</th>
+    <th>Mail</th>
+    <th>Expire Date</th>
+    <th>Service</th>
+    <th>Jira</th>
+  </tr>
+"""
+    mail_users = ""
+    for user in users:
+        mail_users = mail_users + """  <tr>
+    <td>{}</td>
+    <td>{}</td>
+    <td>{}</td>
+    <td>{}</td>
+""".format(user["user"],
+           user["mail"],
+           time.strftime('%d-%m-%Y', time.localtime(int(user["expire"]))),
+           user["service"])
+
+        if "??" in user["jira"]:
+            mail_users = mail_users +"""    <td>???</td>
+  </tr>
+"""
+        else:
+            mail_users = mail_users + """    <td>https://stratio.atlassian.net/browse/{}</td>
+  </tr>
+""".format(user["jira"])
+
+        mail_tail = """</table>
+<br><br>
+Thanks for your time
+"""
+        mail_text = mail_headers + mail_body + mail_users + mail_tail
+
+        logging.debug("Sending mail:")
+        logging.debug('\t\t'.join(mail_text.splitlines(True)))
+        if not dry_run:
+            try:
+                smtp_obj = smtplib.SMTP(str(config['MAIL']['host']),
+                                        int(str(config['MAIL']['port'])))
+                smtp_obj.connect(str(config['MAIL']['host']),
+                                 int(str(config['MAIL']['port'])))
+                smtp_obj.ehlo()
+                smtp_obj.starttls()
+                smtp_obj.ehlo()
+                smtp_obj.login(user=str(config['MAIL']['user']),
+                               password=str(config['MAIL']['password']))
+
+                smtp_obj.sendmail("sistemas@stratio.com",
+                                  "{}@stratio.com".format(ADMINISTRATORS),
+                                  mail_text)
+                smtp_obj.quit()
+
+            except smtplib.SMTPException as e:
+                logging.error("Unable to send email to {}: {}".format(ADMINISTRATORS, e))
         else:
             logging.info("Param --dry-run detected, mail didn't send")
 
@@ -288,8 +348,10 @@ Thanks for your time
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("days",
+    parser.add_argument("--days",
+                        dest="days",
                         type=int,
+                        required=False,
                         help="Days to calculate user expire access. Mandatory")
     parser.add_argument("-c", "--conf",
                         dest="config_file_path",
@@ -308,8 +370,16 @@ def main():
     parser.add_argument("-l", "--log",
                         dest="log_level",
                         default=DEFAULT_LOGGING,
-                        help="Log level for the application [debug, info, warn, error]. Default: info")
+                        choices=['debug', 'info', 'warn', 'error'],
+                        help="Log level for the application. Default: info")
     args = parser.parse_args()
+
+    if args.days is None and not args.delete:
+        parser.error('You need to specify one of [--delete] or [--days] param')
+        exit(1)
+    if args.days is not None and args.delete:
+        parser.error('You need to specify only one of [--delete] or [--days] param')
+        exit(1)
 
     if args.log_level in ("debug", "DEBUG"):
         logging_level = logging.DEBUG
@@ -324,9 +394,11 @@ def main():
         logging_level = logging.WARN
 
     logging.basicConfig(encoding='utf-8', level=logging_level)
-    if args.days <= 0:
+
+    if args.days is not None and args.days <= 0:
         logging.error("Days must be a int > 0")
         exit(-1)
+
     config = load_config(args.config_file_path)
     managers, users, managers_delete, users_delete = get_ldap_users(config, args.days)
     if args.delete:
