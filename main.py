@@ -59,7 +59,7 @@ def get_ldap_users(config, days_expire):
     for user in conn.entries:
         if int(str(user.shadowExpire)) < now:
             info = [s for s in user.description if s.__contains__("Responsable")]
-            manager = str(info).split(',')[0].split(': ')[1].strip()
+            manager = str(info[0]).split(',')[0].split(': ')[1].strip()
             if manager not in managers:
                 managers_delete.append(manager)
             service = [s for s in user.description if not s.__contains__("Responsable")]
@@ -71,8 +71,8 @@ def get_ldap_users(config, days_expire):
                                  "jira": str(info).split(',')[1].split(': ')[1].strip()})
 
         elif int(str(user.shadowExpire)) - now < epoch_expire:
-            info = [s for s in user.description if s.__contains__("Responsable")]
-            manager = str(info).split(',')[0].split(': ')[1].strip()
+            info = [s for s in user.descrsiption if s.__contains__("Responsable")]
+            manager = str(info[0]).split(',')[0].split(': ')[1].strip()
             if manager not in managers:
                 managers_delete.append(manager)
             service = [s for s in user.description if not s.__contains__("Responsable")]
