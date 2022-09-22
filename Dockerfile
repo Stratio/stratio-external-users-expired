@@ -25,4 +25,4 @@ WORKDIR /external-users
 RUN pip3 install -r /external-users/requirements.txt
 
 
-ENTRYPOINT ["/bin/bash", "/entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]
