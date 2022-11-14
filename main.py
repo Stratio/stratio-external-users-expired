@@ -143,6 +143,7 @@ Next access users were removed from their services associated:
         mail_users = ""
         for user in users:
             if user["manager"] == manager:
+                logging.info('User to delete: {}'.format(user["user"]))
                 mail_users = mail_users + """  <tr>
     <td>{}</td>
     <td>{}</td>
