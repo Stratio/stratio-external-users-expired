@@ -60,7 +60,7 @@ def get_ldap_users(config, days_expire):
         if int(str(user.shadowExpire)) < now:
             info = [s for s in user.description if s.__contains__("Responsable")]
             manager = str(info[0]).split(',')[0].split(': ')[1].strip()
-            if manager not in managers:
+            if manager not in managers_delete:
                 managers_delete.append(manager)
             service = [s for s in user.description if not s.__contains__("Responsable")]
             users_delete.append({"user": str(user.uid),
@@ -71,17 +71,17 @@ def get_ldap_users(config, days_expire):
                                  "jira": str(info).split(',')[1].split(': ')[1].strip()})
 
         elif int(str(user.shadowExpire)) - now < epoch_expire:
-            info = [s for s in user.descrsiption if s.__contains__("Responsable")]
+            info = [s for s in user.description if s.__contains__("Responsable")]
             manager = str(info[0]).split(',')[0].split(': ')[1].strip()
             if manager not in managers:
-                managers_delete.append(manager)
+                managers.append(manager)
             service = [s for s in user.description if not s.__contains__("Responsable")]
-            users_delete.append({"user": str(user.uid),
-                                 "mail": str(user.mail),
-                                 "expire": str(user.shadowExpire),
-                                 "manager": str(manager),
-                                 "service": str(service[0]),
-                                 "jira": str(info).split(',')[1].split(': ')[1].strip()})
+            users.append({"user": str(user.uid),
+                          "mail": str(user.mail),
+                          "expire": str(user.shadowExpire),
+                          "manager": str(manager),
+                          "service": str(service[0]),
+                          "jira": str(info).split(',')[1].split(': ')[1].strip()})
 
     return managers, users, managers_delete, users_delete
 
